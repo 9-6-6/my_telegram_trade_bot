@@ -1,0 +1,10 @@
+python-telegram-bot==13.7
+pandas
+numpy
+pytz
+python-dotenv
+requests
+schedule
+tradingview_ta
+tensorflow
+scikit-learn 
