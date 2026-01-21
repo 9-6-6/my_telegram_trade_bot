@@ -2,14 +2,25 @@
 
 A sophisticated, AI-powered trading bot that provides **autonomous trading signals** for forex, commodities, metals, indices, and cryptocurrencies using machine learning, technical analysis, and sentiment analysis.
 
+**NEW: XM360 Auto Trader v2.0** - Full automation with trailing stops, multiple take profits, and pending orders!
+
 ![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
 ![Telegram](https://img.shields.io/badge/Telegram-Bot%20API-blue.svg)
 ![ML](https://img.shields.io/badge/ML-Scikit--Learn-orange.svg)
+![MT5](https://img.shields.io/badge/MT5-Auto%20Trading-green.svg)
 ![Status](https://img.shields.io/badge/Status-Active-green.svg)
 
 ---
 
 ## ✨ Features
+
+### 🚀 NEW: XM360 Auto Trader v2.0
+- **Pending Orders**: Trades activate only at signal price (not immediately)
+- **Trailing Stop Loss**: SL automatically moves as profit grows
+- **Multiple Take Profits**: Close partial positions at different targets
+- **Full BUY/SELL Support**: All features work for both directions
+- **10% Balance Protection**: Never risk more than 10% of your account
+- **Price Validation**: Rejects stale signals automatically
 
 ### ⚡ NEW: Scalp AI Engine
 - **AI-Powered Scalping**: Dedicated engine for short-term trades (5min-1hour)
@@ -93,6 +104,90 @@ A sophisticated, AI-powered trading bot that provides **autonomous trading signa
 | SOLUSD | Solana |
 | ADAUSD | Cardano |
 | DOGEUSD | Dogecoin |
+
+---
+
+## 🤖 XM360 Auto Trader v2.0
+
+The auto trader automatically executes trades on your XM360 broker account based on signals from the Telegram bot.
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Pending Orders** | Trade activates only when price reaches signal entry |
+| **Trailing Stop Loss** | SL moves automatically as profit grows |
+| **Multiple Take Profits** | Close 50% at TP1, remaining at TP2 |
+| **10% Balance Rule** | Never risk more than 10% of account |
+| **BUY & SELL Support** | Full automation for both directions |
+
+### How Trailing Stop Works
+
+```
+BUY Trade Example:
+Entry: $2655, Initial SL: $2645
+
+Price rises to $2660 (+$5) → Trailing ACTIVATES
+  → SL moves UP from $2645 to $2657 (locks profit!)
+
+Price rises to $2670 → SL moves UP to $2667
+  → Even if price drops, you keep $12 profit!
+
+SELL Trade Example:
+Entry: $2655, Initial SL: $2665
+
+Price drops to $2650 (+$5) → Trailing ACTIVATES
+  → SL moves DOWN from $2665 to $2653 (locks profit!)
+
+Price drops to $2640 → SL moves DOWN to $2643
+  → Profit protected if price reverses!
+```
+
+### Quick Start
+
+```bash
+# Start both bots (Windows)
+START_ALL_BOTS.bat
+
+# Or manually:
+python trading_bot.py                    # Terminal 1
+python xm360_auto_trader/auto_trader_v2.py  # Terminal 2
+```
+
+### Configuration
+
+Edit `xm360_auto_trader/config.py`:
+```python
+ACCOUNT = 315982803           # Your XM360 account
+PASSWORD = "YourPassword"     # Your MT5 password
+SERVER = "XMGlobal-MT5 7"     # Your server
+
+MAX_BALANCE_USAGE_PERCENT = 10.0  # Risk only 10% max
+MIN_BALANCE_TO_TRADE = 100.0      # Minimum balance required
+```
+
+Edit `xm360_auto_trader/auto_trader_v2.py` for trailing stop settings:
+```python
+TRAILING_STOP_CONFIG = {
+    "XAUUSD": {
+        "enabled": True,
+        "activation_profit_dollars": 5.0,   # Start trailing after $5 profit
+        "trail_distance_dollars": 3.0,      # Keep SL $3 behind price
+    }
+}
+
+TAKE_PROFIT_CONFIG = {
+    "XAUUSD": {
+        "use_multiple_tps": True,
+        "tp_levels": [
+            {"offset_dollars": 10.0, "percent_close": 50},   # TP1
+            {"offset_dollars": 20.0, "percent_close": 100},  # TP2
+        ]
+    }
+}
+```
+
+📖 **Full documentation**: See [WIKI_USER_GUIDE.md](WIKI_USER_GUIDE.md)
 
 ---
 
@@ -394,6 +489,36 @@ aiohttp>=3.9.0
 apscheduler>=3.10.0
 pytz>=2023.3
 joblib>=1.3.0
+MetaTrader5>=5.0.0  # For XM360 Auto Trader
+yfinance>=0.2.0     # For price validation
+```
+
+---
+
+## 📁 Project Structure
+
+```
+my_telegram_trade_bot/
+├── trading_bot.py           # Main Telegram bot
+├── copy_trading_bot.py      # Alternative bot version
+├── START_ALL_BOTS.bat       # Start both bots (Windows)
+├── STOP_ALL_BOTS.bat        # Stop all bots
+├── WIKI_USER_GUIDE.md       # Complete documentation
+├── README.md                # This file
+│
+├── src/                     # Source modules
+│   ├── config.py            # Telegram bot config
+│   └── bot.py               # Bot logic
+│
+└── xm360_auto_trader/       # Auto trading module
+    ├── auto_trader_v2.py    # Enhanced auto trader (v2.0)
+    ├── auto_trader.py       # Basic auto trader (v1.0)
+    ├── advanced_trade_manager.py  # Trailing stop, multiple TPs
+    ├── config.py            # XM360 account settings
+    ├── mt5_connector.py     # MetaTrader 5 connection
+    ├── risk_manager.py      # 10% balance protection
+    ├── signal_receiver.py   # Signal queue reader
+    └── test_*.py            # Test files
 ```
 
 ---
