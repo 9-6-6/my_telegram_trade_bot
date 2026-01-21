@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.constants import ParseMode as TelegramParseMode
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, Application, ContextTypes
+from telegram.ext import CommandHandler, CallbackQueryHandler, Application, ContextTypes
 from tradingview_ta import TA_Handler, Interval, Exchange
 import pandas as pd
 import numpy as np
@@ -16,7 +16,13 @@ from dotenv import load_dotenv
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import joblib
-import talib
+# talib is optional - requires C library installation
+try:
+    import talib
+    TALIB_AVAILABLE = True
+except ImportError:
+    TALIB_AVAILABLE = False
+    print("[WARNING] TA-Lib not available. Some indicators will be disabled.")
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
@@ -431,9 +437,9 @@ class TradingBot:
         return False
 
     def get_multi_timeframe_data(self, symbol: str, timeframes=None):
-        """Fetch indicator/sentiment data for multiple timeframes."""
+        """Fetch indicator/sentiment data for multiple timeframes (1m to 48h)."""
         if timeframes is None:
-            timeframes = ['1h', '4h', '1d']
+            timeframes = ['1m', '3m', '5m', '7m', '10m', '15m', '20m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '48h']
         tf_data = {}
         for tf in timeframes:
             # Placeholder: In real use, fetch real data for each timeframe

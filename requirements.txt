@@ -1,4 +1,4 @@
-python-telegram-bot==13.7
+python-telegram-bot>=20.0
 pandas
 numpy
 pytz
@@ -7,4 +7,10 @@ requests
 schedule
 tradingview_ta
 tensorflow
-scikit-learn 
+scikit-learn
+joblib
+beautifulsoup4
+apscheduler
+TA-Lib
+newsapi-python
+ccxt

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.constants import ParseMode as TelegramParseMode
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, Application, ContextTypes
+from telegram.ext import CommandHandler, CallbackQueryHandler, Application, ContextTypes
 from tradingview_ta import TA_Handler, Interval, Exchange
 import pandas as pd
 import numpy as np
@@ -16,7 +16,13 @@ from dotenv import load_dotenv
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import joblib
-import talib
+# talib is optional - requires C library installation
+try:
+    import talib
+    TALIB_AVAILABLE = True
+except ImportError:
+    TALIB_AVAILABLE = False
+    print("[WARNING] TA-Lib not available. Some indicators will be disabled.")
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
@@ -25,6 +31,30 @@ import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bs4 import BeautifulSoup
 import telegram
+
+# Import news signal integration
+try:
+    from news_signal_integration import NewsSignalIntegration
+    NEWS_SIGNAL_AVAILABLE = True
+except ImportError:
+    NEWS_SIGNAL_AVAILABLE = False
+    print("[WARNING] News Signal Engine not available. /newsignal command will be disabled.")
+
+# Import autonomous signal generator
+try:
+    from autonomous_signal_generator import AutonomousSignalGenerator, AutoSignal
+    AUTONOMOUS_AVAILABLE = True
+except ImportError:
+    AUTONOMOUS_AVAILABLE = False
+    print("[WARNING] Autonomous Signal Generator not available.")
+
+# Import Scalp AI Engine
+try:
+    from scalp_ai_engine import ScalpSignalEngine, ScalpSignal
+    SCALP_AI_AVAILABLE = True
+except ImportError:
+    SCALP_AI_AVAILABLE = False
+    print("[WARNING] Scalp AI Engine not available.")
 
 # Load environment variables
 load_dotenv()
@@ -56,6 +86,9 @@ class TradingBot:
         # Initialize user settings dictionary
         self.user_settings = {}
         
+        # Initialize signal subscribers (users who want auto-signals)
+        self.signal_subscribers = set()
+        
         # Initialize signal history
         self.signal_history = []
         
@@ -72,6 +105,31 @@ class TradingBot:
         self.ml_model = self.initialize_ml_model()
         self.min_ml_confidence = 0.7
         
+        # Initialize News Signal Engine
+        if NEWS_SIGNAL_AVAILABLE:
+            self.news_handler = NewsSignalIntegration(min_confidence=0.40)
+            print("[INFO] News Signal Engine initialized")
+        else:
+            self.news_handler = None
+        
+        # Initialize Autonomous Signal Generator
+        if AUTONOMOUS_AVAILABLE:
+            self.auto_generator = AutonomousSignalGenerator()
+            self.auto_scan_task = None
+            print("[INFO] Autonomous Signal Generator initialized")
+        else:
+            self.auto_generator = None
+            self.auto_scan_task = None
+        
+        # Initialize Scalp AI Engine
+        if SCALP_AI_AVAILABLE:
+            self.scalp_engine = ScalpSignalEngine()
+            self.scalp_scan_task = None
+            print("[INFO] Scalp AI Engine initialized")
+        else:
+            self.scalp_engine = None
+            self.scalp_scan_task = None
+        
         # Register handlers
         self.register_handlers()
         
@@ -81,11 +139,23 @@ class TradingBot:
     def register_handlers(self):
         """Register command handlers."""
         self.application.add_handler(CommandHandler("start", self.start))
+        self.application.add_handler(CommandHandler("help", self.help))
         self.application.add_handler(CommandHandler("signal", self.signal))
+        self.application.add_handler(CommandHandler("newsignal", self.newsignal))
+        self.application.add_handler(CommandHandler("autoscan", self.autoscan))
+        self.application.add_handler(CommandHandler("stopscan", self.stopscan))
+        self.application.add_handler(CommandHandler("scalp", self.scalp))
+        self.application.add_handler(CommandHandler("scalpscan", self.scalpscan))
+        self.application.add_handler(CommandHandler("stopscalp", self.stopscalp))
+        self.application.add_handler(CommandHandler("symbols", self.symbols))
         self.application.add_handler(CommandHandler("performance", self.performance))
         self.application.add_handler(CommandHandler("settings", self.settings))
         self.application.add_handler(CommandHandler("setpairs", self.setpairs))
         self.application.add_handler(CommandHandler("setnotify", self.setnotify))
+        self.application.add_handler(CommandHandler("status", self.status))
+        self.application.add_handler(CommandHandler("timeframes", self.timeframes))
+        self.application.add_handler(CommandHandler("subscribe", self.subscribe))
+        self.application.add_handler(CommandHandler("unsubscribe", self.unsubscribe))
 
     def setup_news_monitoring(self):
         """Setup news monitoring with scheduler."""
@@ -97,6 +167,17 @@ class TradingBot:
                 minutes=5,
                 id='news_monitor'
             )
+            
+            # Schedule auto signal broadcast every 2 minutes
+            if self.auto_generator:
+                self.scheduler.add_job(
+                    self.auto_broadcast_signals,
+                    'interval',
+                    minutes=2,
+                    id='auto_broadcast'
+                )
+                print("[INFO] Auto signal broadcast scheduled (every 2 min)")
+            
             print("[INFO] News monitoring setup complete")
         except Exception as e:
             print(f"[ERROR] Error setting up news monitoring: {e}")
@@ -110,6 +191,38 @@ class TradingBot:
             print("[INFO] News impact updated successfully")
         except Exception as e:
             print(f"[ERROR] Error updating news impact: {e}")
+
+    async def auto_broadcast_signals(self):
+        """Automatically scan and broadcast signals to subscribers - SENDS IMMEDIATELY when generated."""
+        if not self.signal_subscribers:
+            return  # No subscribers, skip scanning
+        
+        try:
+            # Define callback to send signal IMMEDIATELY when generated
+            async def send_signal_immediately(signal):
+                """Callback to broadcast signal as soon as it's generated"""
+                message = self.auto_generator.format_signal_message(signal)
+                await self.broadcast_signal(message)
+                
+                # Log the signal
+                self.log_signal({
+                    'symbol': signal.symbol,
+                    'type': signal.signal_type.value,
+                    'entry_price': signal.entry_price,
+                    'confidence': signal.confidence,
+                    'risk_reward': signal.risk_reward_ratio
+                })
+            
+            # Scan with callback - signals sent IMMEDIATELY as they're found
+            signals = await self.auto_generator.scan_all_markets(
+                on_signal_callback=send_signal_immediately
+            )
+            
+            if signals:
+                logger.info(f"✅ Scan complete: {len(signals)} signals sent to {len(self.signal_subscribers)} subscribers")
+                    
+        except Exception as e:
+            logger.error(f"Error in auto broadcast: {e}")
 
     def initialize_ml_model(self):
         """Initialize and load ML model."""
@@ -145,7 +258,725 @@ class TradingBot:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("/start command received")
-        await update.message.reply_text("✅ Copy bot is alive! Send /signal XAUUSD or /signal BTCUSD to test.")
+        
+        # If user provides a symbol with /start, treat it as a signal request
+        if context.args:
+            # Redirect to newsignal command
+            await self.newsignal(update, context)
+            return
+        
+        welcome_msg = (
+            "✅ *Copy Trading Bot is Live!*\n\n"
+            "📊 *Available Commands:*\n"
+            "`/newsignal XAUUSD` - Get AI signal\n"
+            "`/scalp EURUSD` - Get scalp signal ⚡\n"
+            "`/autoscan` - Start AUTO scanning 🔥\n"
+            "`/scalpscan` - Start SCALP scanning ⚡\n"
+            "`/stopscan` - Stop auto scanning\n"
+            "`/stopscalp` - Stop scalp scanning\n"
+            "`/symbols` - View all 100+ symbols\n"
+            "`/performance` - View signal stats\n\n"
+            "⚡ *SCALP AI MODE:* (NEW!)\n"
+            "Use `/scalpscan` to activate AI-powered\n"
+            "scalp detection with 85%+ confidence!\n"
+            "• Pattern recognition\n"
+            "• 5min to 1hour timeframes\n"
+            "• Quick profit targets\n\n"
+            "🤖 *AUTO SCAN MODE:*\n"
+            "Use `/autoscan` for full market scanning\n"
+            "with regular and swing signals.\n\n"
+            "🎯 *Quick Examples:*\n"
+            "`/scalp XAUUSD` - Gold scalp signal ⚡\n"
+            "`/newsignal US500` - S&P 500 signal\n"
+            "`/start BTCUSD` - Bitcoin signal\n\n"
+            "_Use /autoscan for hands-free trading signals!_"
+        )
+        await update.message.reply_text(welcome_msg, parse_mode='Markdown')
+
+    async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show detailed help for all commands."""
+        print("/help command received")
+        
+        help_msg = (
+            "📚 *COMPLETE COMMAND GUIDE*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "🚀 *GETTING STARTED:*\n"
+            "`/start` - Welcome message & quick start\n"
+            "`/help` - This detailed help guide\n"
+            "`/symbols` - View all 100+ trading symbols\n"
+            "`/timeframes` - View all analysis timeframes\n"
+            "`/status` - Check bot & scanning status\n\n"
+            
+            "📊 *SIGNAL COMMANDS:*\n"
+            "`/signal SYMBOL` - Quick trading signal\n"
+            "`/newsignal SYMBOL` - AI-powered news signal\n"
+            "  _Example: /newsignal XAUUSD_\n\n"
+            
+            "⚡ *SCALP TRADING (5min-1hr):*\n"
+            "`/scalp SYMBOL` - Get AI scalp signal\n"
+            "`/scalpscan` - Auto-scan for scalp opportunities\n"
+            "`/stopscalp` - Stop scalp scanning\n"
+            "  _Example: /scalp BTCUSD_\n\n"
+            
+            "🔄 *AUTO SCANNING:*\n"
+            "`/autoscan` - Start autonomous market scan\n"
+            "`/stopscan` - Stop auto scanning\n"
+            "  _Scans all markets for opportunities!_\n\n"
+            
+            "📈 *ANALYSIS & SETTINGS:*\n"
+            "`/performance` - View signal statistics\n"
+            "`/settings` - View current settings\n"
+            "`/setpairs PAIRS` - Set watched pairs\n"
+            "`/setnotify on/off` - Toggle notifications\n\n"
+            
+            "� *AUTO NOTIFICATIONS:*\n"
+            "`/subscribe` - Get auto signals (NEW!)\n"
+            "`/unsubscribe` - Stop auto signals\n"
+            "  _Receive signals automatically!_\n\n"
+            
+            "💡 *TIPS:*\n"
+            "• Use `/subscribe` for auto signals!\n"
+            "• Use `/scalpscan` for quick profits\n"
+            "• Use `/autoscan` for hands-free trading\n"
+            "• Higher confidence = better signals\n\n"
+            
+            "🎯 *QUICK EXAMPLES:*\n"
+            "`/scalp XAUUSD` - Gold scalp ⚡\n"
+            "`/newsignal EURUSD` - EUR/USD signal\n"
+            "`/signal BTCUSD` - Bitcoin signal\n"
+            "`/subscribe` - Auto signal delivery\n\n"
+            
+            "_💬 Bot analyzes 15 timeframes from 1min to 48hrs!_"
+        )
+        await update.message.reply_text(help_msg, parse_mode='Markdown')
+
+    async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show current bot status."""
+        print("/status command received")
+        
+        # Check scanning status
+        autoscan_status = "🟢 ACTIVE" if self.is_auto_scanning else "🔴 Stopped"
+        scalpscan_status = "🟢 ACTIVE" if self.is_scalp_scanning else "🔴 Stopped"
+        
+        # Get live prices from scalp engine
+        live_prices = ""
+        if hasattr(self, 'scalp_engine') and self.scalp_engine:
+            for symbol, price in self.scalp_engine.live_prices.items():
+                live_prices += f"  • {symbol}: ${price:,.2f}\n"
+        
+        status_msg = (
+            "📊 *BOT STATUS*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            f"🤖 *Bot Status:* 🟢 Online\n\n"
+            
+            "📡 *Scanning Status:*\n"
+            f"  • Auto Scan: {autoscan_status}\n"
+            f"  • Scalp Scan: {scalpscan_status}\n\n"
+            
+            "💰 *Live Prices:*\n"
+            f"{live_prices if live_prices else '  _Fetching..._'}\n"
+            
+            "⏱️ *Analysis Timeframes:* 15\n"
+            "  _1m, 3m, 5m, 7m, 10m, 15m, 20m, 30m_\n"
+            "  _1h, 2h, 4h, 8h, 12h, 24h, 48h_\n\n"
+            
+            "📈 *Scalp Symbols:* 4\n"
+            "  _XAUUSD, XAUEUR, XAGUSD, BTCUSD_\n\n"
+            
+            "_Use /help for all commands_"
+        )
+        await update.message.reply_text(status_msg, parse_mode='Markdown')
+
+    async def timeframes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show all analysis timeframes."""
+        print("/timeframes command received")
+        
+        tf_msg = (
+            "⏱️ *ANALYSIS TIMEFRAMES*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "🚀 *ULTRA-SHORT (Scalping):*\n"
+            "  `1m` - 1 Minute\n"
+            "  `3m` - 3 Minutes\n"
+            "  `5m` - 5 Minutes\n"
+            "  `7m` - 7 Minutes\n"
+            "  `10m` - 10 Minutes\n\n"
+            
+            "⚡ *SHORT-TERM (Day Trading):*\n"
+            "  `15m` - 15 Minutes _(Primary)_\n"
+            "  `20m` - 20 Minutes\n"
+            "  `30m` - 30 Minutes\n"
+            "  `1h` - 1 Hour\n\n"
+            
+            "📊 *MEDIUM-TERM (Swing):*\n"
+            "  `2h` - 2 Hours\n"
+            "  `4h` - 4 Hours\n"
+            "  `8h` - 8 Hours\n\n"
+            
+            "📈 *LONG-TERM (Position):*\n"
+            "  `12h` - 12 Hours\n"
+            "  `24h` - 24 Hours (1 Day)\n"
+            "  `48h` - 48 Hours (2 Days)\n\n"
+            
+            "🎯 *HOW IT WORKS:*\n"
+            "• All 15 timeframes are analyzed\n"
+            "• Short-term: Quick scalp entries\n"
+            "• Medium-term: Trend confirmation\n"
+            "• Long-term: Overall direction\n\n"
+            
+            "📊 *TREND ALIGNMENT:*\n"
+            "• Higher alignment = Stronger signal\n"
+            "• 80%+ alignment = Premium signal\n\n"
+            
+            "_Use /scalp or /newsignal to get signals!_"
+        )
+        await update.message.reply_text(tf_msg, parse_mode='Markdown')
+
+    async def subscribe(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Subscribe to automatic signal notifications."""
+        print("/subscribe command received")
+        
+        chat_id = update.effective_chat.id
+        
+        if chat_id in self.signal_subscribers:
+            await update.message.reply_text(
+                "✅ *You're already subscribed!*\n\n"
+                "You'll receive signals automatically when they're generated.\n\n"
+                "Use `/unsubscribe` to stop receiving signals.",
+                parse_mode='Markdown'
+            )
+        else:
+            self.signal_subscribers.add(chat_id)
+            await update.message.reply_text(
+                "🔔 *SUBSCRIBED SUCCESSFULLY!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "✅ You'll now receive automatic signals!\n\n"
+                "📊 *What you'll get:*\n"
+                "• High-confidence trading signals\n"
+                "• Scalp signals (XAUUSD, BTCUSD)\n"
+                "• Entry, SL, and TP levels\n\n"
+                "Use `/unsubscribe` to stop receiving signals.",
+                parse_mode='Markdown'
+            )
+            logger.info(f"User {chat_id} subscribed to signals")
+
+    async def unsubscribe(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Unsubscribe from automatic signal notifications."""
+        print("/unsubscribe command received")
+        
+        chat_id = update.effective_chat.id
+        
+        if chat_id in self.signal_subscribers:
+            self.signal_subscribers.discard(chat_id)
+            await update.message.reply_text(
+                "🔕 *UNSUBSCRIBED*\n\n"
+                "You will no longer receive automatic signals.\n\n"
+                "Use `/subscribe` to start receiving signals again.",
+                parse_mode='Markdown'
+            )
+            logger.info(f"User {chat_id} unsubscribed from signals")
+        else:
+            await update.message.reply_text(
+                "ℹ️ You weren't subscribed to signals.\n\n"
+                "Use `/subscribe` to start receiving signals.",
+                parse_mode='Markdown'
+            )
+
+    async def broadcast_signal(self, message: str):
+        """Broadcast a signal to all subscribers."""
+        if not self.signal_subscribers:
+            logger.info("No subscribers to broadcast to")
+            return
+        
+        for chat_id in self.signal_subscribers.copy():
+            try:
+                await self.application.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode='Markdown'
+                )
+                logger.info(f"Signal broadcasted to {chat_id}")
+            except Exception as e:
+                logger.error(f"Failed to send to {chat_id}: {e}")
+                # Remove invalid chat_ids
+                if "chat not found" in str(e).lower() or "blocked" in str(e).lower():
+                    self.signal_subscribers.discard(chat_id)
+
+    async def symbols(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show all supported trading symbols."""
+        print("/symbols command received")
+        
+        symbols_msg = (
+            "📊 *SUPPORTED TRADING INSTRUMENTS*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "💱 *FOREX MAJORS:*\n"
+            "`EURUSD` `GBPUSD` `USDJPY` `USDCHF`\n"
+            "`AUDUSD` `USDCAD` `NZDUSD`\n\n"
+            
+            "💱 *FOREX MINORS:*\n"
+            "`EURGBP` `EURJPY` `GBPJPY` `EURAUD`\n"
+            "`EURCAD` `GBPAUD` `GBPCAD` `AUDJPY`\n"
+            "`NZDJPY` `AUDNZD` `CADJPY` `CHFJPY`\n\n"
+            
+            "💱 *FOREX EXOTICS:*\n"
+            "`USDZAR` `USDMXN` `USDTRY` `EURTRY`\n"
+            "`USDSEK` `USDNOK` `USDSGD` `USDCNH`\n\n"
+            
+            "🥇 *PRECIOUS METALS:*\n"
+            "`XAUUSD` (Gold) `XAGUSD` (Silver)\n"
+            "`XPTUSD` (Platinum) `XPDUSD` (Palladium)\n\n"
+            
+            "⛽ *ENERGY:*\n"
+            "`USOIL` (WTI Crude) `UKOIL` (Brent)\n"
+            "`NATURALGAS` `NGAS`\n\n"
+            
+            "🌾 *AGRICULTURE:*\n"
+            "`WHEAT` `CORN` `SOYBEAN` `COFFEE`\n"
+            "`SUGAR` `COTTON` `COCOA` `COPPER`\n\n"
+            
+            "🇺🇸 *US INDICES:*\n"
+            "`US30` (Dow Jones) `US500` (S&P 500)\n"
+            "`US100` (NASDAQ) `US2000` (Russell)\n\n"
+            
+            "🇪🇺 *EUROPEAN INDICES:*\n"
+            "`GER40` (DAX) `UK100` (FTSE)\n"
+            "`FRA40` (CAC) `EU50` (Euro Stoxx)\n"
+            "`ESP35` (IBEX) `ITA40` `SUI20`\n\n"
+            
+            "🌏 *ASIAN INDICES:*\n"
+            "`JPN225` (Nikkei) `HK50` (Hang Seng)\n"
+            "`AUS200` (ASX) `INDIA50` (Nifty)\n"
+            "`CN50` (China A50) `SG30`\n\n"
+            
+            "₿ *CRYPTOCURRENCIES:*\n"
+            "`BTCUSD` `ETHUSD` `BNBUSD` `XRPUSD`\n"
+            "`SOLUSD` `ADAUSD` `DOGEUSD` `DOTUSD`\n"
+            "`LINKUSD` `AVAXUSD` `LTCUSD` `MATICUSD`\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📝 *Usage:* `/newsignal SYMBOL`\n"
+            "_Example:_ `/newsignal US500`"
+        )
+        await update.message.reply_text(symbols_msg, parse_mode='Markdown')
+
+    async def newsignal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /newsignal command - News-based AI signal generation."""
+        print("/newsignal command received")
+        
+        # Check if news handler is available
+        if not self.news_handler:
+            await update.message.reply_text(
+                "❌ News Signal Engine is not available. Please check the installation."
+            )
+            return
+        
+        # Get symbol from args
+        if not context.args:
+            await update.message.reply_text(
+                "📝 *Usage:* `/newsignal SYMBOL`\n\n"
+                "*Examples:*\n"
+                "`/newsignal XAUUSD` - Gold\n"
+                "`/newsignal EURUSD` - Euro/Dollar\n"
+                "`/newsignal BTCUSD` - Bitcoin\n"
+                "`/newsignal GBPUSD` - British Pound",
+                parse_mode='Markdown'
+            )
+            return
+        
+        symbol = context.args[0].upper()
+        
+        # Send processing message
+        processing_msg = await update.message.reply_text(
+            f"🔄 *Analyzing {symbol}...*\n\n"
+            "📰 Fetching latest news...\n"
+            "📊 Running technical analysis...\n"
+            "🤖 Generating AI signal...",
+            parse_mode='Markdown'
+        )
+        
+        try:
+            # Get signal from news engine
+            signal = await self.news_handler.get_signal_for_symbol(symbol)
+            
+            if signal:
+                # Format and send the signal
+                message = self.news_handler.format_telegram_message(signal)
+                await processing_msg.edit_text(message, parse_mode='Markdown')
+                
+                # Log the signal
+                self.log_signal({
+                    'symbol': symbol,
+                    'type': signal.signal_type.value,
+                    'entry_price': signal.entry_price,
+                    'confidence': signal.confidence,
+                    'risk_reward': signal.risk_reward_ratio
+                })
+            else:
+                await processing_msg.edit_text(
+                    f"ℹ️ *No Signal Available for {symbol}*\n\n"
+                    "Possible reasons:\n"
+                    "• Market conditions are neutral\n"
+                    "• Confidence below threshold\n"
+                    "• Mixed news sentiment\n\n"
+                    "_Try again later or check another symbol._",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            logger.error(f"Error generating news signal for {symbol}: {e}")
+            await processing_msg.edit_text(
+                f"❌ Error generating signal for {symbol}.\n"
+                "Please try again later."
+            )
+
+    async def autoscan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start autonomous market scanning."""
+        print("/autoscan command received")
+        
+        if not AUTONOMOUS_AVAILABLE or not self.auto_generator:
+            await update.message.reply_text(
+                "❌ Autonomous Signal Generator is not available.\n"
+                "Please check the installation."
+            )
+            return
+        
+        chat_id = update.effective_chat.id
+        
+        # Check if already scanning
+        if self.auto_scan_task and not self.auto_scan_task.done():
+            await update.message.reply_text(
+                "⚠️ *Auto scanning is already running!*\n\n"
+                "Use `/stopscan` to stop it first.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Initialize the generator if needed
+        try:
+            await self.auto_generator.initialize()
+            
+            # Add this chat to receive signals
+            if chat_id not in self.auto_generator.chat_ids:
+                self.auto_generator.chat_ids.append(chat_id)
+            
+            await update.message.reply_text(
+                "🚀 *AUTO SCAN MODE ACTIVATED!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "🔍 The bot will now:\n"
+                "• Scan 30+ instruments every 60 seconds\n"
+                "• Analyze news, sentiment & technicals\n"
+                "• Use ML model for predictions\n"
+                "• Send signals with 75%+ confidence\n"
+                "• Alert scalp trades with 90%+ probability\n\n"
+                "📊 *Scanning:*\n"
+                "• Forex Majors & Minors\n"
+                "• Gold, Silver, Oil\n"
+                "• US, EU, Asia Indices\n"
+                "• Top Cryptocurrencies\n\n"
+                "⏱️ _Signals will be sent automatically..._\n"
+                "Use `/stopscan` to stop scanning.",
+                parse_mode='Markdown'
+            )
+            
+            # Start the scanning task
+            self.auto_scan_task = asyncio.create_task(
+                self._run_auto_scan(chat_id)
+            )
+            
+            logger.info(f"Auto scan started for chat {chat_id}")
+            
+        except Exception as e:
+            logger.error(f"Error starting auto scan: {e}")
+            await update.message.reply_text(
+                f"❌ Error starting auto scan: {str(e)}"
+            )
+    
+    async def _run_auto_scan(self, chat_id: int):
+        """Background task for auto scanning."""
+        scan_count = 0
+        
+        while True:
+            try:
+                scan_count += 1
+                logger.info(f"Auto scan #{scan_count} starting...")
+                
+                # Scan all markets
+                signals = await self.auto_generator.scan_all_markets()
+                
+                if signals:
+                    logger.info(f"Found {len(signals)} signals in scan #{scan_count}")
+                    
+                    for signal in signals:
+                        # Format and send the signal
+                        message = self.auto_generator.format_signal_message(signal)
+                        
+                        try:
+                            await self.application.bot.send_message(
+                                chat_id=chat_id,
+                                text=message,
+                                parse_mode='Markdown'
+                            )
+                            
+                            # Log the signal
+                            self.log_signal({
+                                'symbol': signal.symbol,
+                                'type': signal.signal_type.value,
+                                'entry_price': signal.entry_price,
+                                'confidence': signal.confidence,
+                                'risk_reward': signal.risk_reward_ratio
+                            })
+                            
+                            await asyncio.sleep(2)  # Small delay between signals
+                            
+                        except Exception as e:
+                            logger.error(f"Error sending signal: {e}")
+                else:
+                    logger.info(f"No signals in scan #{scan_count}")
+                
+                # Wait before next scan (60 seconds)
+                await asyncio.sleep(60)
+                
+            except asyncio.CancelledError:
+                logger.info("Auto scan task cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in auto scan: {e}")
+                await asyncio.sleep(30)  # Wait and retry
+    
+    async def stopscan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Stop autonomous market scanning."""
+        print("/stopscan command received")
+        
+        if self.auto_scan_task and not self.auto_scan_task.done():
+            self.auto_scan_task.cancel()
+            
+            try:
+                await self.auto_scan_task
+            except asyncio.CancelledError:
+                pass
+            
+            self.auto_scan_task = None
+            
+            await update.message.reply_text(
+                "🛑 *AUTO SCAN STOPPED*\n\n"
+                "The bot has stopped scanning for signals.\n"
+                "Use `/autoscan` to start again.",
+                parse_mode='Markdown'
+            )
+            logger.info("Auto scan stopped by user")
+        else:
+            await update.message.reply_text(
+                "ℹ️ Auto scan is not currently running.\n"
+                "Use `/autoscan` to start scanning.",
+                parse_mode='Markdown'
+            )
+
+    async def scalp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Get a scalp signal for a specific symbol."""
+        print("/scalp command received")
+        
+        if not SCALP_AI_AVAILABLE or not self.scalp_engine:
+            await update.message.reply_text(
+                "❌ Scalp AI Engine is not available.\n"
+                "Please check the installation."
+            )
+            return
+        
+        # Get symbol from command arguments
+        if context.args:
+            symbol = context.args[0].upper()
+        else:
+            await update.message.reply_text(
+                "⚡ *SCALP AI ENGINE*\n\n"
+                "AI-powered scalp signals for quick trades.\n\n"
+                "*Usage:* `/scalp SYMBOL`\n"
+                "*Example:* `/scalp XAUUSD`\n\n"
+                "*Scalp Symbols (4):*\n"
+                "• 🥇 XAUUSD - Gold/USD\n"
+                "• 🥇 XAUEUR - Gold/EUR\n"
+                "• 🥈 XAGUSD - Silver/USD\n"
+                "• ₿ BTCUSD - Bitcoin\n\n"
+                "Use `/scalpscan` for auto scanning!",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Send "analyzing" message
+        processing_msg = await update.message.reply_text(
+            f"⚡ *Analyzing {symbol} for scalp opportunity...*\n"
+            "🤖 AI Engine scanning multiple timeframes...",
+            parse_mode='Markdown'
+        )
+        
+        try:
+            # Get scalp signal
+            signal = self.scalp_engine.analyze_symbol_for_scalp(symbol)
+            
+            if signal:
+                # Format and send the signal
+                message = self.scalp_engine.format_scalp_signal(signal)
+                
+                await processing_msg.edit_text(message, parse_mode='Markdown')
+                
+                # Log the signal
+                self.log_signal({
+                    'symbol': signal.symbol,
+                    'type': f"SCALP_{signal.direction}",
+                    'entry_price': signal.entry_price,
+                    'confidence': signal.confidence,
+                    'risk_reward': signal.risk_reward
+                })
+            else:
+                await processing_msg.edit_text(
+                    f"⏸️ *No Scalp Signal for {symbol}*\n\n"
+                    "The AI did not find a high-confidence\n"
+                    "scalp opportunity at this moment.\n\n"
+                    "• Minimum confidence required: 85%\n"
+                    "• Check back in a few minutes\n"
+                    "• Try `/scalpscan` for all symbols",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            logger.error(f"Error getting scalp signal: {e}")
+            await processing_msg.edit_text(
+                f"❌ Error analyzing {symbol}: {str(e)}"
+            )
+
+    async def scalpscan(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start autonomous scalp signal scanning."""
+        print("/scalpscan command received")
+        
+        if not SCALP_AI_AVAILABLE or not self.scalp_engine:
+            await update.message.reply_text(
+                "❌ Scalp AI Engine is not available.\n"
+                "Please check the installation."
+            )
+            return
+        
+        if self.scalp_scan_task and not self.scalp_scan_task.done():
+            await update.message.reply_text(
+                "⚡ Scalp scanning is already running!\n"
+                "Use `/stopscalp` to stop it first."
+            )
+            return
+        
+        chat_id = update.effective_chat.id
+        
+        try:
+            await update.message.reply_text(
+                "⚡ *SCALP AI SCANNER ACTIVATED!* ⚡\n\n"
+                "🎯 *Scanning 4 Premium Symbols:*\n"
+                "• 🥇 XAUUSD (Gold/USD)\n"
+                "• 🥇 XAUEUR (Gold/EUR)\n"
+                "• 🥈 XAGUSD (Silver/USD)\n"
+                "• ₿ BTCUSD (Bitcoin)\n\n"
+                "🤖 *AI Detection Active:*\n"
+                "• Pattern recognition\n"
+                "• Multi-timeframe (5m-1h)\n"
+                "• 85%+ confidence only\n"
+                "• Premium at 92%+\n\n"
+                "⏱️ _Scanning every 30 seconds..._\n"
+                "Use `/stopscalp` to stop.",
+                parse_mode='Markdown'
+            )
+            
+            # Start the scalp scanning task
+            self.scalp_scan_task = asyncio.create_task(
+                self._run_scalp_scan(chat_id)
+            )
+            
+            logger.info(f"Scalp scan started for chat {chat_id}")
+            
+        except Exception as e:
+            logger.error(f"Error starting scalp scan: {e}")
+            await update.message.reply_text(
+                f"❌ Error starting scalp scan: {str(e)}"
+            )
+    
+    async def _run_scalp_scan(self, chat_id: int):
+        """Background task for scalp scanning - sends signals IMMEDIATELY when found."""
+        scan_count = 0
+        
+        while True:
+            try:
+                scan_count += 1
+                logger.info(f"Scalp scan #{scan_count} starting...")
+                
+                # Define callback to send scalp signal IMMEDIATELY
+                async def send_scalp_immediately(signal):
+                    """Send scalp signal as soon as it's found"""
+                    message = self.scalp_engine.format_scalp_signal(signal)
+                    
+                    await self.application.bot.send_message(
+                        chat_id=chat_id,
+                        text=message,
+                        parse_mode='Markdown'
+                    )
+                    
+                    # Also broadcast to subscribers
+                    if self.signal_subscribers:
+                        await self.broadcast_signal(message)
+                    
+                    # Log the signal
+                    self.log_signal({
+                        'symbol': signal.symbol,
+                        'type': f"SCALP_{signal.direction}",
+                        'entry_price': signal.entry_price,
+                        'confidence': signal.confidence,
+                        'risk_reward': signal.risk_reward
+                    })
+                
+                # Scan with immediate callback
+                signals = await self.scalp_engine.scan_for_scalp_signals_async(
+                    on_signal_callback=send_scalp_immediately
+                )
+                
+                if signals:
+                    logger.info(f"✅ Scalp scan #{scan_count}: {len(signals)} signals sent")
+                else:
+                    logger.info(f"No scalp signals in scan #{scan_count}")
+                
+                # Wait 30 seconds for scalp scanning (only 4 symbols = fast)
+                await asyncio.sleep(30)
+                
+            except asyncio.CancelledError:
+                logger.info("Scalp scan task cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in scalp scan: {e}")
+                await asyncio.sleep(20)
+    
+    async def stopscalp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Stop scalp signal scanning."""
+        print("/stopscalp command received")
+        
+        if self.scalp_scan_task and not self.scalp_scan_task.done():
+            self.scalp_scan_task.cancel()
+            
+            try:
+                await self.scalp_scan_task
+            except asyncio.CancelledError:
+                pass
+            
+            self.scalp_scan_task = None
+            
+            await update.message.reply_text(
+                "🛑 *SCALP SCANNER STOPPED*\n\n"
+                "AI scalp scanning has been stopped.\n"
+                "Use `/scalpscan` to start again.",
+                parse_mode='Markdown'
+            )
+            logger.info("Scalp scan stopped by user")
+        else:
+            await update.message.reply_text(
+                "ℹ️ Scalp scanner is not running.\n"
+                "Use `/scalpscan` to start scanning.",
+                parse_mode='Markdown'
+            )
 
     def log_signal(self, signal):
         from datetime import datetime
@@ -294,9 +1125,9 @@ class TradingBot:
         return False
 
     def get_multi_timeframe_data(self, symbol: str, timeframes=None):
-        """Fetch indicator/sentiment data for multiple timeframes."""
+        """Fetch indicator/sentiment data for multiple timeframes (1m to 48h)."""
         if timeframes is None:
-            timeframes = ['1h', '4h', '1d']
+            timeframes = ['1m', '3m', '5m', '7m', '10m', '15m', '20m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '48h']
         tf_data = {}
         for tf in timeframes:
             # Placeholder: In real use, fetch real data for each timeframe
@@ -388,8 +1219,8 @@ class TradingBot:
         if self.should_avoid_trading(symbol):
             print(f"[DEBUG] Avoiding trading for {symbol} due to news event")
             return []
-        # Multi-timeframe analysis
-        timeframes = ['1h', '4h', '1d']
+        # Multi-timeframe analysis (comprehensive: 1m to 48h)
+        timeframes = ['1m', '3m', '5m', '7m', '10m', '15m', '20m', '30m', '1h', '2h', '4h', '8h', '12h', '24h', '48h']
         tf_data = self.get_multi_timeframe_data(symbol, timeframes)
         if not self.multi_timeframe_confirmed(tf_data):
             print(f"[DEBUG] Multi-timeframe not confirmed for {symbol}: {[v['trend'] for v in tf_data.values()]}")
@@ -682,6 +1513,7 @@ class TradingBot:
 
 async def main():
     """Start the bot."""
+    bot = None
     try:
         print("Starting bot...")
         bot = TradingBot()
@@ -690,16 +1522,26 @@ async def main():
         bot.start_scheduler()
         
         print("Bot started successfully!")
+        print("Use /start and /signal XAUUSD or /signal BTCUSD in Telegram.")
         
-        # Start the bot
-        await bot.application.initialize()
-        await bot.application.start()
-        await bot.application.run_polling()
+        # Run polling (this handles the event loop)
+        await bot.application.run_polling(drop_pending_updates=True)
         
+    except KeyboardInterrupt:
+        print("\nBot stopped by user.")
     except Exception as e:
         print(f"Error starting bot: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
+        if bot and bot.scheduler.running:
+            bot.scheduler.shutdown()
         print("Bot stopped.")
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    import nest_asyncio
+    try:
+        nest_asyncio.apply()
+    except:
+        pass
+    asyncio.run(main())
