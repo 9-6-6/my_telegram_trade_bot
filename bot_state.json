@@ -1,0 +1,12 @@
+{
+  "is_running": false,
+  "balance": 10000.0,
+  "equity": 10000.0,
+  "positions": [],
+  "trade_history": [],
+  "signals_received": 1,
+  "trades_executed": 0,
+  "start_time": null,
+  "trailing_enabled": true,
+  "max_risk": 10.0
+}

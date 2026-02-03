@@ -1,0 +1,10 @@
+{
+  "is_trading_enabled": true,
+  "auto_scan_enabled": true,
+  "scalp_scan_enabled": true,
+  "balance": 10000.0,
+  "start_time": "2026-01-23T17:55:12.475672",
+  "auto_scan_count": 18,
+  "scalp_scan_count": 85,
+  "signals_sent": 33
+}

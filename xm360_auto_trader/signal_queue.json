@@ -1,0 +1,13 @@
+[
+  {
+    "symbol": "XAUUSD",
+    "direction": "BUY",
+    "entry_price": 2670.0,
+    "timestamp": "2026-01-21T17:37:01.446363",
+    "source": "ScalpAI Engine",
+    "processed": false,
+    "stop_loss": 2665.0,
+    "take_profit": 2680.0,
+    "confidence": 75.0
+  }
+]

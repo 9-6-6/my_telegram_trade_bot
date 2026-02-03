@@ -1,0 +1,47 @@
+2025-06-14 21:39:01,306 - config - WARNING - TELEGRAM_BOT_TOKEN not found in environment variables
+2025-06-14 21:39:01,306 - config - WARNING - NEWS_API_KEY not found in environment variables
+2025-06-14 21:39:01,306 - config - ERROR - Configuration validation failed: TELEGRAM_BOT_TOKEN is required
+2025-06-14 22:08:09,098 - config - WARNING - TELEGRAM_BOT_TOKEN not found in environment variables
+2025-06-14 22:08:09,098 - config - WARNING - NEWS_API_KEY not found in environment variables
+2025-06-14 22:08:09,098 - config - ERROR - Configuration validation failed: TELEGRAM_BOT_TOKEN is required
+2025-06-14 22:08:30,723 - config - WARNING - TELEGRAM_BOT_TOKEN not found in environment variables
+2025-06-14 22:08:30,723 - config - WARNING - NEWS_API_KEY not found in environment variables
+2025-06-14 22:08:30,723 - config - ERROR - Configuration validation failed: TELEGRAM_BOT_TOKEN is required
+2025-06-14 22:59:51,101 - config - WARNING - NEWS_API_KEY not found in environment variables
+2025-06-14 22:59:51,101 - config - INFO - Configuration validated successfully
+2025-06-14 22:59:51,117 - config - INFO - Telegram Bot Token loaded successfully
+2025-06-14 22:59:51,117 - config - INFO - Default Timeframe: 1h
+2025-06-14 22:59:51,117 - config - INFO - Minimum Confidence: 0.85
+2025-06-14 22:59:51,117 - config - INFO - Maximum Spread: 0.0002
+2025-06-14 22:59:51,117 - config - INFO - Minimum Volume: 1500
+2025-06-14 22:59:51,117 - config - WARNING - Please set NEWS_API_KEY in your environment variables
+2025-06-14 22:59:51,117 - config - INFO - Maximum Daily Loss: 2.0%
+2025-06-14 22:59:51,117 - config - INFO - Maximum Position Size: 1.0%
+2025-06-14 22:59:51,117 - config - INFO - Maximum Open Trades: 3
+2025-06-14 22:59:51,117 - config - INFO - Trading Hours: 08:00 - 20:00 UTC
+2025-06-14 22:59:51,117 - config - INFO - Forex Pairs:
+2025-06-14 22:59:51,117 - config - INFO - - EURUSD
+2025-06-14 22:59:51,117 - config - INFO - - GBPUSD
+2025-06-14 22:59:51,117 - config - INFO - - USDJPY
+2025-06-14 22:59:51,117 - config - INFO - - AUDUSD
+2025-06-14 22:59:51,117 - config - INFO - - USDCAD
+2025-06-14 22:59:51,117 - config - INFO - Commodities:
+2025-06-14 22:59:51,117 - config - INFO - - XAUUSD
+2025-06-14 22:59:51,117 - config - INFO - - XAGUSD
+2025-06-14 22:59:51,117 - config - INFO - - USOIL
+2025-06-14 22:59:51,122 - config - INFO - - UKOIL
+2025-06-14 22:59:51,122 - config - INFO - Technical Analysis Parameters:
+2025-06-14 22:59:51,122 - config - INFO - - rsi_period: 14
+2025-06-14 22:59:51,122 - config - INFO - - macd_fast: 12
+2025-06-14 22:59:51,122 - config - INFO - - macd_slow: 26
+2025-06-14 22:59:51,123 - config - INFO - - macd_signal: 9
+2025-06-14 22:59:51,123 - config - INFO - - bollinger_period: 20
+2025-06-14 22:59:51,123 - config - INFO - - bollinger_std: 2.0
+2025-06-14 22:59:51,123 - config - INFO - Signal Filters:
+2025-06-14 22:59:51,124 - config - INFO - - min_confidence: 0.85
+2025-06-14 22:59:51,124 - config - INFO - - min_risk_reward: 2.5
+2025-06-14 22:59:51,124 - config - INFO - - max_spread: 0.0002
+2025-06-14 22:59:51,124 - config - INFO - - min_volume: 1500
+2025-06-14 22:59:51,124 - config - INFO - - min_indicators: 7
+2025-06-14 22:59:51,125 - config - INFO - - min_patterns: 3
+2025-06-14 22:59:51,125 - config - INFO - Configuration test completed successfully
